@@ -43,3 +43,10 @@ La même remarque pour le ports :
 
 ## Lancez jupyter sans spark  
 >> `jupyter lab`
+
+
+# Vous avez l’accès à partir de la machine principale avec les URLs suivants
+>> Jupyter : http://127.0.0.1:9999/lab<br>
+>> Spark Master : http://127.0.0.1:8081<br>
+>> Spark Worker : http://127.0.0.1:8081<br>
+>> Spark Jobs : http://127.0.0.1:4040/jobs<br>
