@@ -1,6 +1,7 @@
 # Chargement du docker 
 
->> `git clone https://github.com/rbizoi/dockerBigData`
+>> `git clone https://github.com/rbizoi/dockerBigData`<br>
+>> `cd dockerBigData\spark`
 
 # Effacement du docker si il à été crée 
 
