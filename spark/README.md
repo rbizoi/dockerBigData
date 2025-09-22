@@ -1,3 +1,7 @@
+# Chargement du docker 
+
+>> `git clone https://github.com/rbizoi/dockerBigData`
+
 # Effacement du docker si il à été crée 
 
 >> `docker container rm spark`
