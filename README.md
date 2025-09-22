@@ -1,5 +1,6 @@
 # Chargement du docker 
 
+>> `git config --global core.autocrlf false`<br>
 >> `git clone https://github.com/rbizoi/dockerBigData`<br>
 >> `cd dockerBigData\spark`
 
