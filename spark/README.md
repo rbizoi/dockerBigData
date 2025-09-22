@@ -7,6 +7,17 @@
 
 >> `docker container rm spark`
 
+# Configuration du fichier Dockerfile
+
+Les variables que vous pouvez modifier dans le fichier **Dockerfile** (seulement si necessaire):
+>> `NOM_MACHINE=jupiter.olimp.fr`<br>
+>> `ROOT_PASSWORD=coursBigData`<br>
+>> `SPARK_PASSWORD=coursBigData`<br>
+>> `SPARK_HOME=/opt/spark`<br>
+>> `SPARK_USER=spark`<br>
+>> `CONDA_HOME=/home/spark/miniconda`<br>
+>> `CONDA_DEFAULT_ENV=spark`<br>
+
 # Création de l’image
 
 >> `docker build -t spark .`
