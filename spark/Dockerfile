@@ -4,20 +4,29 @@
 FROM ubuntu:22.04
 
 # Variables d'environnement
+ENV NOM_MACHINE=jupiter.olimp.fr
 ENV DEBIAN_FRONTEND=noninteractive
+ENV ROOT_PASSWORD=coursBigData
+ENV SPARK_PASSWORD=coursBigData
 ENV SPARK_VERSION=4.0.1
+ENV HADOOP_VERSION=3
+ENV PYTHON_VERSION=3.13
 ENV SPARK_HOME=/opt/spark
+ENV SPARK_USER=spark
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-ENV PATH=$PATH:$JAVA_HOME/bin
+ENV M3_HOME=/usr/share/maven
+ENV MAVEN_HOME=/usr/share/maven
+ENV MAVEN_OPTS="-Xmx4g -XX:ReservedCodeCacheSize=2g"
+ENV PATH=$M3_HOME/bin:$JAVA_HOME/bin:$PATH
 
-RUN echo "root:coursBigData" | chpasswd
+RUN echo "root:$ROOT_PASSWORD" | chpasswd
 
 # --------------------------------------------------------------------------------------------------------------
 # Installer dépendances
 # --------------------------------------------------------------------------------------------------------------
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    openjdk-17-jdk wget curl python3 python3-pip \
+    openjdk-17-jdk maven wget curl python3 python3-pip supervisor tree \
     rsync vim net-tools ca-certificates bzip2 ssh openssh-client openssh-server iputils-ping unzip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -28,23 +37,27 @@ RUN echo "LogLevel=quiet" >> /etc/ssh/ssh_config
 # --------------------------------------------------------------------------------------------------------------
 # Installer Spark avec Hadoop support
 # --------------------------------------------------------------------------------------------------------------
-RUN wget https://downloads.apache.org/spark/spark-$SPARK_VERSION/spark-$SPARK_VERSION-bin-hadoop3.tgz \
-    && tar -xvzf spark-$SPARK_VERSION-bin-hadoop3.tgz -C /opt \
-    && mv /opt/spark-$SPARK_VERSION-bin-hadoop3 $SPARK_HOME \
-    && rm spark-$SPARK_VERSION-bin-hadoop3.tgz
+RUN wget https://downloads.apache.org/spark/spark-$SPARK_VERSION/spark-$SPARK_VERSION-bin-hadoop$HADOOP_VERSION.tgz \
+    && tar -xvzf spark-$SPARK_VERSION-bin-hadoop$HADOOP_VERSION.tgz -C /opt \
+    && mv /opt/spark-$SPARK_VERSION-bin-hadoop$HADOOP_VERSION $SPARK_HOME \
+    && rm spark-$SPARK_VERSION-bin-hadoop$HADOOP_VERSION.tgz
 
 COPY ./spark-conf/* /opt/spark/conf
 
-#RUN echo "spark.master	spark://`hostname -f`:7077" >> $SPARK_HOME/conf/spark-defaults.conf
-#RUN echo "`hostname -f`" > $SPARK_HOME/conf/slaves
+RUN echo "spark.master                    spark://$NOM_MACHINE:7077"                                  >> $SPARK_HOME/conf/spark-defaults.conf
+RUN echo "spark.eventLog.dir              file:///home/$SPARK_USER/spark_dir/server_eventlogs"        >> $SPARK_HOME/conf/spark-defaults.conf
+RUN echo "spark.history.fs.logDirectory   file:///home/$SPARK_USER/spark_dir/server_logs"             >> $SPARK_HOME/conf/spark-defaults.conf
+RUN echo "spark.sql.warehouse.dir         file:///home/$SPARK_USER/spark_dir/referentiel-metadonnees" >> $SPARK_HOME/conf/spark-defaults.conf
+
+RUN echo "$NOM_MACHINE"                   > $SPARK_HOME/conf/slaves
 
 # --------------------------------------------------------------------------------------------------------------
 # Créer un utilisateur non-root pour Spark
 # --------------------------------------------------------------------------------------------------------------
-RUN useradd -ms /bin/bash spark \
-    && chown -R spark:spark $SPARK_HOME
+RUN useradd -ms /bin/bash $SPARK_USER \
+    && chown -R $SPARK_USER:$SPARK_USER $SPARK_HOME
 
-RUN echo "spark:coursBigData" | chpasswd
+RUN echo "$SPARK_USER:$SPARK_PASSWORD" | chpasswd
 
 # --------------------------------------------------------------------------------------------------------------
 # Copier les donnees 
@@ -79,32 +92,39 @@ COPY ./app/donnees/meteoFranceSYNOP/postesSynop.csv /app/donnees
 COPY ./app/sparkNotebooks/*  /app/sparkNotebooks
 
 COPY ./app/* /app
+COPY ./jupyter/* /app
+
+COPY ./sparkUser/start-all.sh         /home/$SPARK_USER
+COPY ./sparkUser/stop-all.sh          /home/$SPARK_USER
+									  
+RUN chmod 777 /home/$SPARK_USER/*-all.sh
+RUN chown $SPARK_USER:$SPARK_USER /home/$SPARK_USER/*-all.sh
 
 RUN chmod -R 777 /app
-RUN chown -R spark:spark /app
-RUN chown -R spark:spark /var/log/spark
-RUN chown -R spark:spark /var/run/spark
+RUN chown -R $SPARK_USER:$SPARK_USER /app
+RUN chown -R $SPARK_USER:$SPARK_USER /var/log/spark
+RUN chown -R $SPARK_USER:$SPARK_USER /var/run/spark
 
 # --------------------------------------------------------------------------------------------------------------
 # Passer à l’utilisateur sparkuser
 # --------------------------------------------------------------------------------------------------------------
-USER spark
-WORKDIR /home/spark
+USER $SPARK_USER
+WORKDIR /home/$SPARK_USER
 
-RUN mkdir -p /home/spark/spark_dir/server_eventlogs
-RUN mkdir -p /home/spark/spark_dir/server_logs
-RUN mkdir -p /home/spark/spark_dir/referentiel-metadonnees
+RUN mkdir -p /home/$SPARK_USER/spark_dir/server_eventlogs
+RUN mkdir -p /home/$SPARK_USER/spark_dir/server_logs
+RUN mkdir -p /home/$SPARK_USER/spark_dir/referentiel-metadonnees
 
-ENV CONDA_DIR=/home/spark/miniconda
+ENV CONDA_HOME=/home/spark/miniconda
 # --------------------------------------------------------------------------------------------------------------
 # Installer Miniconda
 # --------------------------------------------------------------------------------------------------------------
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
-    bash /tmp/miniconda.sh -b -p $CONDA_DIR && \
+    bash /tmp/miniconda.sh -b -p $CONDA_HOME && \
     rm /tmp/miniconda.sh \
-    && $CONDA_DIR/bin/conda clean -afy
+    && $CONDA_HOME/bin/conda clean -afy
 	
-ENV PATH=$CONDA_DIR/bin:$PATH
+ENV PATH=$CONDA_HOME/bin:$PATH
 
 # --------------------------------------------------------------------------------------------------------------
 # Créer un environnement conda pour Python
@@ -112,17 +132,31 @@ ENV PATH=$CONDA_DIR/bin:$PATH
 RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
 RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 
-RUN conda create -y -n spark -c conda-forge python=3.13 ipython ipython-sql jupyter notebook \
+ENV CONDA_DEFAULT_ENV=spark
+
+RUN conda create -y -n $CONDA_DEFAULT_ENV -c conda-forge python=$PYTHON_VERSION ipython ipython-sql jupyter notebook \
                numpy pandas  matplotlib seaborn plotly portpicker flatbuffers colour \
-			   pydot pyyaml folium imgaug imagecodecs pyarrow pyspark==4.0.1 && \
+			   pydot pyyaml folium imgaug imagecodecs pyarrow pyspark==$SPARK_VERSION && \
     conda clean -afy
 	
-ENV CONDA_DEFAULT_ENV=spark
-ENV SPARK_HOME=/opt/spark
-ENV PYSPARK_PYTHON=/opt/conda/bin/python
+ENV SPARK_HOME=$SPARK_HOME
+ENV PYSPARK_PYTHON=$CONDA_HOME/envs/$CONDA_DEFAULT_ENV/bin/python
 ENV PYSPARK_DRIVER_PYTHON=jupyter
 ENV PYSPARK_DRIVER_PYTHON_OPTS='lab'
-ENV PATH=$SPARK_HOME/bin:$SPARK_HOME/sbin:$CONDA_DIR/envs/spark/bin:$PATH
+ENV PATH=$SPARK_HOME/bin:$SPARK_HOME/sbin:$CONDA_HOME/envs/$CONDA_DEFAULT_ENV/bin:$PATH
+
+RUN jupyter lab --generate-config
+RUN jupyter server --generate-config
+RUN python /app/init_serveur.py
+RUN rm /app/init_serveur.py
+
+RUN echo "ROOT_PASSWORD=$ROOT_PASSWORD" >> /app/mot.de.passe.txt
+RUN echo "SPARK_PASSWORD=$SPARK_PASSWORD" >> /app/mot.de.passe.txt
+
+RUN echo "$SPARK_HOME/sbin/start-master.sh"                            >> /home/$SPARK_USER/.bashrc
+RUN echo "sleep 5"                                                     >> /home/$SPARK_USER/.bashrc
+RUN echo "$SPARK_HOME/sbin/start-worker.sh  spark://$NOM_MACHINE:7077" >> /home/$SPARK_USER/.bashrc
+RUN echo "jps"                                                         >> /home/$SPARK_USER/.bashrc
 
 # --------------------------------------------------------------------------------------------------------------
 # Ports exposés
@@ -132,23 +166,5 @@ EXPOSE 22 7077 8888 8081 8082 18080 10000
 # Définir le dossier de travail
 WORKDIR /app
 
-
 # Commande par défaut pour démarrer un shell PySpark
 CMD ["bash"]
-
-# docker container rm spark
-# docker build -t spark .
-# docker run -it --name spark --hostname minerve.olimp.fr -p 2222:22 -p 4040:4040 -p 7077:7077 -p 8888:8888 -p 8081:8081 -p 8082:8082 -p 18080:18080 -p 10000:10000 spark
-# docker start -ai spark
-# docker exec -it spark bash
-
-# $SPARK_HOME/sbin/start-all.sh
-# $SPARK_HOME/sbin/stop-all.sh
-# cat $SPARK_HOME/conf/spark-env.sh
-# cat $SPARK_HOME/conf/spark-defaults.conf
-# cat $SPARK_HOME/conf/slaves
-
-
-
-
-
